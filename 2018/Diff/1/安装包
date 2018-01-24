@@ -1,0 +1,5 @@
+1.安装包
+C:\Users\xiongyq\AppData\Local\Continuum\anaconda3>cd Scripts
+C:\Users\xiongyq\AppData\Local\Continuum\anaconda3\Scripts>pip install psycopg2
+
+2.

@@ -1,0 +1,155 @@
+# -*- coding: utf-8 -*-
+# Time: 2018-02-23 10:10
+# Author: Yiqing
+# File: 流量分析.py
+# Software: Pycharm
+# Version: Python3.6.
+
+###################################################################################################################
+###调包
+###################################################################################################################
+import  cx_Oracle
+import pandas as pd
+import datetime
+import time
+import numpy as np
+import matplotlib.pyplot as plt
+
+###################################################################################################################
+###导入数据
+###################################################################################################################
+db_oracle= cx_Oracle.makedsn("221.224.35.86","1555","orcl")
+conn = cx_Oracle.connect(user = 'liy',password = '20180801',dsn = db_oracle)
+query1='SELECT * from TEP_DETECTOR_FLOW_LY '
+flow_data=pd.read_sql_query(query1,conn)
+query2='SELECT * FROM TEP_ROAD_CROSS_RML12_YQ'
+rml_info=pd.read_sql_query(query2,conn)
+query3='SELECT * FROM TBL_CALENDER'
+calender_info=pd.read_sql_query(query3,conn)
+
+###################################################################################################################
+###flow_data数据预处理
+###################################################################################################################
+###1.了解data frame,并删除无用变量。
+print(flow_data.info())
+
+#（1）ID 是unique ID,无意义，可删除。
+del flow_data['ID']
+#（2）PER_TIME_INT的variance为0，无意义，可删除。
+print(flow_data['PER_TIME_INT'].value_counts())
+del flow_data['PER_TIME_INT']
+#（3）CREATE_DT和RECEIVE_DT，这两个变量取CREATE_DT这个变量，RECEIVE_DT删除。
+Diff=(flow_data['RECEIVE_DT']-flow_data['CREATE_DT'])
+del flow_data['RECEIVE_DT']
+
+###2.保留正常的线圈检测器的数据。
+#（1）check STATUS这个变量的情况：0，正常；1,离线；2，故障；3，告警。
+#其中，离线和故障的数据将近60万，对数据影响不大，可删除离线和故障状态。只保留“正常”状态的数据。
+print(flow_data['STATUS'].value_counts())
+flow_data=flow_data.loc[flow_data['STATUS'].isin([0])]
+del flow_data['STATUS']
+
+#################################################################################################################
+###flow_data特征工程
+#################################################################################################################
+
+###1.时间维度创造新变量
+#（1）小时
+flow_data['hour']=flow_data['CREATE_DT'].dt.hour
+#（2）月份
+flow_data['month']=flow_data['CREATE_DT'].dt.month
+print(flow_data['month'].value_counts())
+#（3）日期
+flow_data['date']=flow_data['CREATE_DT'].dt.date
+#可以根据有效的date数，计算日均车流量
+#（4）季
+flow_data['quarter']=flow_data['month']
+flow_data['quarter']=pd.cut(np.array(flow_data['quarter']),4,labels=['1Q','2Q','3Q','4Q'])
+#（5）假期情况:暂不处理
+#0：非假期;   1:法定假期；   2:国外假期
+#flow_data['vacation']=flow_data['date']
+#(6)和calender_info表连接，获取节假日情况
+calender_info['date']=calender_info['date'].dt.date
+flow_data=pd.merge(flow_data,calender_info,how='left',on='date')
+
+################################################################################################################
+###连接flow_data和rml_info两个表
+################################################################################################################
+
+###1.补全空间维度数据
+#(1)把flow_data和rml_info这两个表连接起来。
+flow_data1=pd.merge(flow_data,rml_info,how='left',on='SIGNAL_CROSS_NO')
+
+#了解其他变量：SIGNAL_DETECOR_NO,SIGNAL_CROSS_NO,VOL_INT,CREATE_DT
+print(flow_data['SIGNAL_DETECTOR_NO'].value_counts())
+print(flow_data['SIGNAL_CROSS_NO'].value_counts())
+#共12个路口，每个路口的流量情况也是不一样的，其中302路口的流量最大，223,340,216,305路口的流量值最小
+
+################################################################################################################
+###进行统计分析
+################################################################################################################
+
+###1.年平均日交通量AADT（基于现有数据）
+#（1）人民路全部路段
+days=len(set(flow_data1['date']))#共292天
+flows=flow_data1['VOL_INT'].sum()
+AADT=flows/days
+print(AADT)
+#年平均日交通量为：52.7万次
+
+#（2）各路段分别计算
+AADT_12LOCATIONS=flow_data1.groupby(by=['LOCATION']).sum()
+AADT_12LOCATIONS=AADT_12LOCATIONS[['VOL_INT']]
+AADT_12LOCATIONS['AVG_VOL_INT']=AADT_12LOCATIONS['VOL_INT']/days
+AADT_12LOCATIONS=AADT_12LOCATIONS.reset_index()
+tep_data=pd.DataFrame({"NS_NO":[3,10,8,12,4,1,5,2,11,9,6,7]})
+AADT_12LOCATIONS=pd.concat([AADT_12LOCATIONS,tep_data],axis=1)
+AADT_12LOCATIONS=AADT_12LOCATIONS.sort_index(by='NS_NO')
+#AADT_12LOCATIONS.to_excel('年平均日交通量.xlsx')
+
+
+###2.月平均日交通量（17年3月至18年1月）
+#(1)人民路全部路段的总流量值
+Month_flows=flow_data1.groupby(by=['month']).sum()
+#(2)计算12个月，每个月的有效日期
+#2017年3月：共15天
+month3=flow_data1[flow_data1.month==3]
+month3_days=len(set(month3['date']))
+#2017年4月:共26天
+month4=flow_data1[flow_data1.month==4]
+month4_days=len(set(month4['date']))
+#2017年5月：共18天
+month5=flow_data1[flow_data1.month==5]
+month5_days=len(set(month5['date']))
+#2017年6月：共30天
+month6=flow_data1[flow_data1.month==6]
+month6_days=len(set(month6['date']))
+#2017年7月：共31天
+month7=flow_data1[flow_data1.month==7]
+month7_days=len(set(month7['date']))
+#2017年8月：共29天
+month8=flow_data1[flow_data1.month==8]
+month8_days=len(set(month8['date']))
+#2017年9月：共29天
+month9=flow_data1[flow_data1.month==9]
+month9_days=len(set(month9['date']))
+#2017年10月：共31天
+month10=flow_data1[flow_data1.month==10]
+month10_days=len(set(month10['date']))
+#2017年11月：共27天
+month11=flow_data1[flow_data1.month==11]
+month11_days=len(set(month11['date']))
+#2017年12月：共25天
+month12=flow_data1[flow_data1.month==12]
+month12_days=len(set(month12['date']))
+#2018年1月：共31天
+month1=flow_data1[flow_data1.month==1]
+month1_days=len(set(month1['date']))
+months_days=pd.DataFrame({"months_days":[month1_days,month3_days,month4_days,month5_days,month6_days,month7_days,month8_days
+    ,month9_days,month10_days,month11_days,month12_days]})
+Month_flows=Month_flows.reset_index()
+Month_flows=pd.concat([Month_flows,months_days],axis=1)
+Month_flows=Month_flows[['month','VOL_INT','months_days']]
+Month_flows['AVG_VOL_INT']=Month_flows['VOL_INT']/Month_flows['months_days']
+#Month_flows.to_excel('月平均日交通量.xlsx')
+
